@@ -1356,6 +1356,12 @@ pub mod ffi {
 
         // BRepTools
         pub fn outer_wire(face: &TopoDS_Face) -> UniquePtr<TopoDS_Wire>;
+        pub fn write_brep_text(shape: &TopoDS_Shape, path: String) -> bool;
+        pub fn read_brep_text(path: String) -> UniquePtr<TopoDS_Shape>;
+
+        // BinTools
+        pub fn write_brep_bin(shape: &TopoDS_Shape, path: String) -> bool;
+        pub fn read_brep_bin(path: String) -> UniquePtr<TopoDS_Shape>;
 
         // Cleaning
         type ShapeUpgrade_UnifySameDomain;
@@ -1405,6 +1411,7 @@ pub mod ffi {
         type BRepBndLib;
 
         pub fn BRepBndLib_Add(shape: &TopoDS_Shape, bb: Pin<&mut Bnd_Box>, use_triangulation: bool);
+
     }
 }
 
