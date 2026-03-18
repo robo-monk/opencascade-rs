@@ -66,11 +66,19 @@
 #include <Poly_Connect.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
+#include <STEPCAFControl_Reader.hxx>
+#include <STEPCAFControl_Writer.hxx>
 #include <ShapeAnalysis_FreeBounds.hxx>
 #include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Type.hxx>
 #include <StlAPI_Writer.hxx>
+#include <TCollection_AsciiString.hxx>
 #include <TColgp_Array1OfDir.hxx>
+#include <TDataStd_Name.hxx>
+#include <TDF_Label.hxx>
+#include <TDF_LabelSequence.hxx>
+#include <TDF_Tool.hxx>
+#include <TDocStd_Document.hxx>
 #include <TColgp_HArray1OfPnt.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp_Explorer.hxx>
@@ -87,15 +95,90 @@
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
+#include <XCAFApp_Application.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 
 // Generic template constructor
 template <typename T, typename... Args> std::unique_ptr<T> construct_unique(Args... args) {
   return std::unique_ptr<T>(new T(args...));
 }
 
+struct XdeNode {
+  std::string entry;
+  std::string parent_entry;
+  std::string referred_entry;
+  std::string name;
+  TopLoc_Location location;
+  TopoDS_Shape shape;
+  bool is_assembly = false;
+  bool is_reference = false;
+};
+
+struct XdeDocument {
+  Handle(TDocStd_Document) doc;
+  Handle(XCAFDoc_ShapeTool) shape_tool;
+  std::vector<XdeNode> nodes;
+};
+
+struct StepAssemblyWriter {
+  Handle(TDocStd_Document) doc;
+  Handle(XCAFDoc_ShapeTool) shape_tool;
+  TDF_Label root;
+  STEPCAFControl_Writer writer;
+};
+
 // Generic List
 template <typename T> std::unique_ptr<std::vector<T>> list_to_vector(const NCollection_List<T> &list) {
   return std::unique_ptr<std::vector<T>>(new std::vector<T>(list.begin(), list.end()));
+}
+
+inline std::string extended_string_to_utf8(const TCollection_ExtendedString &value) {
+  return TCollection_AsciiString(value).ToCString();
+}
+
+inline std::string label_entry_string(const TDF_Label &label) {
+  TCollection_AsciiString entry;
+  TDF_Tool::Entry(label, entry);
+  return entry.ToCString();
+}
+
+inline std::string label_name_string(const TDF_Label &label) {
+  Handle(TDataStd_Name) name_attr;
+  if (label.FindAttribute(TDataStd_Name::GetID(), name_attr) && !name_attr.IsNull()) {
+    return extended_string_to_utf8(name_attr->Get());
+  }
+  return std::string();
+}
+
+inline void append_xde_nodes(const TDF_Label &label, const std::string &parent_entry, std::vector<XdeNode> &nodes) {
+  XdeNode node;
+  node.entry = label_entry_string(label);
+  node.parent_entry = parent_entry;
+  node.name = label_name_string(label);
+  node.location = XCAFDoc_ShapeTool::GetLocation(label);
+  node.shape = XCAFDoc_ShapeTool::GetShape(label);
+  node.is_assembly = XCAFDoc_ShapeTool::IsAssembly(label);
+  node.is_reference = XCAFDoc_ShapeTool::IsReference(label);
+
+  if (node.is_reference) {
+    TDF_Label referred;
+    if (XCAFDoc_ShapeTool::GetReferredShape(label, referred)) {
+      node.referred_entry = label_entry_string(referred);
+      if (node.name.empty()) {
+        node.name = label_name_string(referred);
+      }
+    }
+  }
+
+  nodes.push_back(node);
+
+  TDF_LabelSequence components;
+  if (XCAFDoc_ShapeTool::GetComponents(label, components, Standard_False)) {
+    for (Standard_Integer index = 1; index <= components.Length(); ++index) {
+      append_xde_nodes(components.Value(index), node.entry, nodes);
+    }
+  }
 }
 
 // Handles
@@ -385,6 +468,71 @@ inline std::unique_ptr<TopoDS_Shape> one_shape_iges(const IGESControl_Reader &re
   return std::unique_ptr<TopoDS_Shape>(new TopoDS_Shape(reader.OneShape()));
 }
 
+inline std::unique_ptr<XdeDocument> read_step_xde(rust::String theFileName) {
+  std::unique_ptr<XdeDocument> document(new XdeDocument());
+
+  Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
+  app->NewDocument("MDTV-XCAF", document->doc);
+
+  STEPCAFControl_Reader reader;
+  reader.SetColorMode(Standard_True);
+  reader.SetNameMode(Standard_True);
+  reader.SetLayerMode(Standard_True);
+  reader.SetPropsMode(Standard_True);
+  reader.SetMatMode(Standard_True);
+
+  if (reader.ReadFile(theFileName.c_str()) != IFSelect_RetDone) {
+    return std::unique_ptr<XdeDocument>();
+  }
+  if (!reader.Transfer(document->doc, Message_ProgressRange())) {
+    return std::unique_ptr<XdeDocument>();
+  }
+
+  document->shape_tool = XCAFDoc_DocumentTool::ShapeTool(document->doc->Main());
+
+  TDF_LabelSequence free_shapes;
+  document->shape_tool->GetFreeShapes(free_shapes);
+  for (Standard_Integer index = 1; index <= free_shapes.Length(); ++index) {
+    append_xde_nodes(free_shapes.Value(index), std::string(), document->nodes);
+  }
+
+  return document;
+}
+
+inline size_t xde_node_count(const XdeDocument &document) { return document.nodes.size(); }
+
+inline rust::String xde_node_entry(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).entry;
+}
+
+inline rust::String xde_node_parent_entry(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).parent_entry;
+}
+
+inline rust::String xde_node_referred_entry(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).referred_entry;
+}
+
+inline rust::String xde_node_name(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).name;
+}
+
+inline bool xde_node_is_assembly(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).is_assembly;
+}
+
+inline bool xde_node_is_reference(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).is_reference;
+}
+
+inline std::unique_ptr<TopLoc_Location> xde_node_location(const XdeDocument &document, size_t index) {
+  return std::unique_ptr<TopLoc_Location>(new TopLoc_Location(document.nodes.at(index).location));
+}
+
+inline std::unique_ptr<TopoDS_Shape> xde_node_shape(const XdeDocument &document, size_t index) {
+  return std::unique_ptr<TopoDS_Shape>(new TopoDS_Shape(document.nodes.at(index).shape));
+}
+
 // Data Export
 inline IFSelect_ReturnStatus transfer_shape(STEPControl_Writer &writer, const TopoDS_Shape &theShape) {
   return writer.Transfer(theShape, STEPControl_AsIs);
@@ -396,6 +544,57 @@ inline bool add_shape(IGESControl_Writer &writer, const TopoDS_Shape &theShape) 
 
 inline IFSelect_ReturnStatus write_step(STEPControl_Writer &writer, rust::String theFileName) {
   return writer.Write(theFileName.c_str());
+}
+
+inline std::unique_ptr<StepAssemblyWriter> step_assembly_writer_new(rust::String root_name) {
+  std::unique_ptr<StepAssemblyWriter> writer(new StepAssemblyWriter());
+
+  Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
+  app->NewDocument("MDTV-XCAF", writer->doc);
+  writer->shape_tool = XCAFDoc_DocumentTool::ShapeTool(writer->doc->Main());
+  writer->root = writer->shape_tool->NewShape();
+  if (!root_name.empty()) {
+    TDataStd_Name::Set(writer->root, TCollection_ExtendedString(root_name.c_str()));
+  }
+
+  writer->writer.SetNameMode(Standard_True);
+  writer->writer.SetLayerMode(Standard_False);
+  writer->writer.SetPropsMode(Standard_False);
+
+  return writer;
+}
+
+inline void step_assembly_writer_add_shape(StepAssemblyWriter &writer, rust::String name, const TopoDS_Shape &shape) {
+  TDF_Label referred = writer.shape_tool->AddShape(shape, Standard_False, Standard_False);
+  TDF_Label component = writer.shape_tool->AddComponent(writer.root, referred, TopLoc_Location());
+  if (!name.empty()) {
+    TCollection_ExtendedString extended_name(name.c_str());
+    TDataStd_Name::Set(component, extended_name);
+
+    TDataStd_Name::Set(referred, extended_name);
+  }
+}
+
+inline void step_assembly_writer_add_shape_located(StepAssemblyWriter &writer,
+                                                   rust::String name,
+                                                   const TopoDS_Shape &shape,
+                                                   const gp_Trsf &transform) {
+  TDF_Label referred = writer.shape_tool->AddShape(shape, Standard_False, Standard_False);
+  TDF_Label component =
+      writer.shape_tool->AddComponent(writer.root, referred, TopLoc_Location(transform));
+  if (!name.empty()) {
+    TCollection_ExtendedString extended_name(name.c_str());
+    TDataStd_Name::Set(component, extended_name);
+    TDataStd_Name::Set(referred, extended_name);
+  }
+}
+
+inline bool step_assembly_writer_write(StepAssemblyWriter &writer, rust::String theFileName) {
+  writer.shape_tool->UpdateAssemblies();
+  if (!writer.writer.Transfer(writer.doc, STEPControl_AsIs, nullptr, Message_ProgressRange())) {
+    return false;
+  }
+  return writer.writer.Write(theFileName.c_str()) == IFSelect_RetDone;
 }
 
 inline bool write_iges(IGESControl_Writer &writer, rust::String theFileName) {

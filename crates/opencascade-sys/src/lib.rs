@@ -1029,6 +1029,21 @@ pub mod ffi {
         pub fn SetScale(self: Pin<&mut gp_Trsf>, point: &gp_Pnt, scale: f64);
         pub fn SetTranslation(self: Pin<&mut gp_Trsf>, point1: &gp_Pnt, point2: &gp_Pnt);
         pub fn Value(self: &gp_Trsf, the_row: i32, the_col: i32) -> f64;
+        pub fn SetValues(
+            self: Pin<&mut gp_Trsf>,
+            a11: f64,
+            a12: f64,
+            a13: f64,
+            a14: f64,
+            a21: f64,
+            a22: f64,
+            a23: f64,
+            a24: f64,
+            a31: f64,
+            a32: f64,
+            a33: f64,
+            a34: f64,
+        );
 
         #[cxx_name = "SetTranslationPart"]
         pub fn set_translation_vec(self: Pin<&mut gp_Trsf>, translation: &gp_Vec);
@@ -1171,6 +1186,7 @@ pub mod ffi {
 
         // Data Import
         type STEPControl_Reader;
+        type XdeDocument;
         type IGESControl_Reader;
         type IFSelect_ReturnStatus;
 
@@ -1198,9 +1214,23 @@ pub mod ffi {
         ) -> i32;
         pub fn one_shape_step(reader: &STEPControl_Reader) -> UniquePtr<TopoDS_Shape>;
         pub fn one_shape_iges(reader: &IGESControl_Reader) -> UniquePtr<TopoDS_Shape>;
+        pub fn read_step_xde(filename: String) -> UniquePtr<XdeDocument>;
+        pub fn xde_node_count(document: &XdeDocument) -> usize;
+        pub fn xde_node_entry(document: &XdeDocument, index: usize) -> String;
+        pub fn xde_node_parent_entry(document: &XdeDocument, index: usize) -> String;
+        pub fn xde_node_referred_entry(document: &XdeDocument, index: usize) -> String;
+        pub fn xde_node_name(document: &XdeDocument, index: usize) -> String;
+        pub fn xde_node_is_assembly(document: &XdeDocument, index: usize) -> bool;
+        pub fn xde_node_is_reference(document: &XdeDocument, index: usize) -> bool;
+        pub fn xde_node_location(
+            document: &XdeDocument,
+            index: usize,
+        ) -> UniquePtr<TopLoc_Location>;
+        pub fn xde_node_shape(document: &XdeDocument, index: usize) -> UniquePtr<TopoDS_Shape>;
 
         // Data Export
         type STEPControl_Writer;
+        type StepAssemblyWriter;
         type IGESControl_Writer;
 
         #[cxx_name = "construct_unique"]
@@ -1220,6 +1250,22 @@ pub mod ffi {
             filename: String,
         ) -> IFSelect_ReturnStatus;
         pub fn write_iges(writer: Pin<&mut IGESControl_Writer>, filename: String) -> bool;
+        pub fn step_assembly_writer_new(root_name: String) -> UniquePtr<StepAssemblyWriter>;
+        pub fn step_assembly_writer_add_shape(
+            writer: Pin<&mut StepAssemblyWriter>,
+            name: String,
+            shape: &TopoDS_Shape,
+        );
+        pub fn step_assembly_writer_add_shape_located(
+            writer: Pin<&mut StepAssemblyWriter>,
+            name: String,
+            shape: &TopoDS_Shape,
+            transform: &gp_Trsf,
+        );
+        pub fn step_assembly_writer_write(
+            writer: Pin<&mut StepAssemblyWriter>,
+            filename: String,
+        ) -> bool;
 
         type StlAPI_Writer;
 

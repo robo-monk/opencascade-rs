@@ -7,12 +7,29 @@ use crate::{
     Error,
 };
 use cxx::UniquePtr;
-use glam::{dvec2, dvec3, DVec3};
+use glam::{dvec2, dvec3, DMat4, DVec3};
 use opencascade_sys::ffi;
 use std::path::Path;
 
 pub struct Shape {
     pub(crate) inner: UniquePtr<ffi::TopoDS_Shape>,
+}
+
+pub struct IndexedFace {
+    pub ordinal: u64,
+    pub face: Face,
+}
+
+pub struct IndexedEdge {
+    pub ordinal: u64,
+    pub edge: Edge,
+    pub adjacent_face_ordinals: Vec<u64>,
+}
+
+#[derive(Default)]
+pub struct IndexedTopology {
+    pub faces: Vec<IndexedFace>,
+    pub edges: Vec<IndexedEdge>,
 }
 
 impl AsRef<Shape> for Shape {
@@ -678,6 +695,55 @@ impl Shape {
         Self::from_shape(upgrader.Shape())
     }
 
+    #[must_use]
+    pub fn transform_matrix(&self, matrix: DMat4) -> Self {
+        let mut transform = ffi::new_gp_GTrsf();
+        for row in 0..3 {
+            for col in 0..4 {
+                transform.pin_mut().SetValue(
+                    row + 1,
+                    col + 1,
+                    matrix.col(col as usize)[row as usize],
+                );
+            }
+        }
+
+        let mut op = ffi::BRepBuilderAPI_GTransform_ctor(&self.inner, &transform, true);
+        op.pin_mut().Build(&ffi::Message_ProgressRange_ctor());
+        Self::from_shape(op.pin_mut().Shape())
+    }
+
+    #[must_use]
+    pub fn translate(&self, offset: DVec3) -> Self {
+        self.transform_matrix(DMat4::from_translation(offset))
+    }
+
+    #[must_use]
+    pub fn rotate(&self, angles_deg: DVec3) -> Self {
+        let angles =
+            dvec3(angles_deg.x.to_radians(), angles_deg.y.to_radians(), angles_deg.z.to_radians());
+        let rotation = DMat4::from_rotation_z(angles.z)
+            * DMat4::from_rotation_y(angles.y)
+            * DMat4::from_rotation_x(angles.x);
+        self.transform_matrix(rotation)
+    }
+
+    #[must_use]
+    pub fn scale(&self, scale: DVec3) -> Self {
+        self.transform_matrix(DMat4::from_scale(scale))
+    }
+
+    #[must_use]
+    pub fn mirror_along_axis(&self, axis_origin: DVec3, axis_dir: DVec3) -> Self {
+        let axis = ffi::gp_Ax1_ctor(&make_point(axis_origin), &make_dir(axis_dir));
+        let mut transform = ffi::new_transform();
+        transform.pin_mut().set_mirror_axis(&axis);
+
+        let mut op = ffi::BRepBuilderAPI_Transform_ctor(&self.inner, &transform, true);
+        op.pin_mut().Build(&ffi::Message_ProgressRange_ctor());
+        Self::from_shape(op.pin_mut().Shape())
+    }
+
     pub fn set_global_translation(&mut self, translation: DVec3) {
         let mut transform = ffi::new_transform();
         let translation_vec = make_vec(translation);
@@ -705,6 +771,43 @@ impl Shape {
     pub fn faces(&self) -> FaceIterator {
         let explorer = ffi::TopExp_Explorer_ctor(&self.inner, ffi::TopAbs_ShapeEnum::TopAbs_FACE);
         FaceIterator { explorer }
+    }
+
+    pub fn indexed_topology(&self) -> IndexedTopology {
+        let mut face_map = ffi::new_indexed_map_of_shape();
+        ffi::map_shapes(&self.inner, ffi::TopAbs_ShapeEnum::TopAbs_FACE, face_map.pin_mut());
+
+        let mut faces = Vec::with_capacity(face_map.Extent() as usize);
+        for index in 1..=face_map.Extent() {
+            let face = ffi::TopoDS_cast_to_face(face_map.FindKey(index));
+            faces.push(IndexedFace { ordinal: index as u64, face: Face::from_face(face) });
+        }
+
+        let mut edge_map = ffi::new_indexed_map_of_shape();
+        ffi::map_shapes(&self.inner, ffi::TopAbs_ShapeEnum::TopAbs_EDGE, edge_map.pin_mut());
+
+        let mut edge_faces = ffi::new_indexed_data_map_of_shape_list_of_shape();
+        ffi::map_shapes_and_unique_ancestors(
+            &self.inner,
+            ffi::TopAbs_ShapeEnum::TopAbs_EDGE,
+            ffi::TopAbs_ShapeEnum::TopAbs_FACE,
+            edge_faces.pin_mut(),
+        );
+
+        let mut edges = Vec::with_capacity(edge_map.Extent() as usize);
+        for index in 1..=edge_map.Extent() {
+            let edge_shape = edge_map.FindKey(index);
+            let edge = ffi::TopoDS_cast_to_edge(edge_shape);
+            let adjacent_face_ordinals =
+                face_ordinals_for_shape_list(&face_map, edge_faces.FindFromKey(edge_shape));
+            edges.push(IndexedEdge {
+                ordinal: index as u64,
+                edge: Edge::from_edge(edge),
+                adjacent_face_ordinals,
+            });
+        }
+
+        IndexedTopology { faces, edges }
     }
 
     // TODO(bschwind) - Convert the return type to an iterator.
@@ -776,6 +879,31 @@ impl Shape {
 
         Self::from_shape(make_hole.pin_mut().Shape())
     }
+}
+
+fn face_ordinals_for_shape_list(
+    face_map: &ffi::TopTools_IndexedMapOfShape,
+    faces: &ffi::TopTools_ListOfShape,
+) -> Vec<u64> {
+    let shape_vec = ffi::shape_list_to_vector(faces);
+    let mut ordinals = Vec::with_capacity(shape_vec.len());
+    for face in shape_vec.iter() {
+        if let Some(ordinal) = face_ordinal(face_map, face) {
+            ordinals.push(ordinal);
+        }
+    }
+    ordinals.sort_unstable();
+    ordinals.dedup();
+    ordinals
+}
+
+fn face_ordinal(
+    face_map: &ffi::TopTools_IndexedMapOfShape,
+    face: &ffi::TopoDS_Shape,
+) -> Option<u64> {
+    (1..=face_map.Extent())
+        .find(|index| face_map.FindKey(*index).IsEqual(face))
+        .map(|index| index as u64)
 }
 
 /// Information about a point where a line hits (i.e. intersects) a face
