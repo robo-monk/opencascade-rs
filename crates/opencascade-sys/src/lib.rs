@@ -1227,6 +1227,10 @@ pub mod ffi {
             index: usize,
         ) -> UniquePtr<TopLoc_Location>;
         pub fn xde_node_shape(document: &XdeDocument, index: usize) -> UniquePtr<TopoDS_Shape>;
+        pub fn xde_node_has_color(document: &XdeDocument, index: usize) -> bool;
+        pub fn xde_node_color_r(document: &XdeDocument, index: usize) -> f64;
+        pub fn xde_node_color_g(document: &XdeDocument, index: usize) -> f64;
+        pub fn xde_node_color_b(document: &XdeDocument, index: usize) -> f64;
 
         // Data Export
         type STEPControl_Writer;

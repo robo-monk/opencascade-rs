@@ -15,6 +15,7 @@ pub struct StepAssemblyNode {
     pub shape: Shape,
     pub is_assembly: bool,
     pub is_reference: bool,
+    pub color: Option<[f64; 3]>,
 }
 
 pub struct StepAssemblyExportNode<'a> {
@@ -33,6 +34,15 @@ pub fn read_step_assembly(path: impl AsRef<Path>) -> Result<Vec<StepAssemblyNode
     let mut nodes = Vec::with_capacity(count);
     for index in 0..count {
         let shape = ffi::xde_node_shape(&document, index);
+        let color = if ffi::xde_node_has_color(&document, index) {
+            Some([
+                ffi::xde_node_color_r(&document, index),
+                ffi::xde_node_color_g(&document, index),
+                ffi::xde_node_color_b(&document, index),
+            ])
+        } else {
+            None
+        };
         nodes.push(StepAssemblyNode {
             entry: ffi::xde_node_entry(&document, index),
             parent_entry: empty_to_none(ffi::xde_node_parent_entry(&document, index)),
@@ -42,6 +52,7 @@ pub fn read_step_assembly(path: impl AsRef<Path>) -> Result<Vec<StepAssemblyNode
             shape: Shape::from_shape(&shape),
             is_assembly: ffi::xde_node_is_assembly(&document, index),
             is_reference: ffi::xde_node_is_reference(&document, index),
+            color,
         });
     }
     Ok(nodes)

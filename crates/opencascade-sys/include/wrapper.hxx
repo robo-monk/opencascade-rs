@@ -64,6 +64,7 @@
 #include <NCollection_Array1.hxx>
 #include <NCollection_Array2.hxx>
 #include <Poly_Connect.hxx>
+#include <Quantity_Color.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_Writer.hxx>
 #include <STEPCAFControl_Reader.hxx>
@@ -96,6 +97,7 @@
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 #include <XCAFApp_Application.hxx>
+#include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
@@ -113,6 +115,10 @@ struct XdeNode {
   TopoDS_Shape shape;
   bool is_assembly = false;
   bool is_reference = false;
+  double color_r = -1.0;
+  double color_g = -1.0;
+  double color_b = -1.0;
+  bool has_color = false;
 };
 
 struct XdeDocument {
@@ -151,7 +157,9 @@ inline std::string label_name_string(const TDF_Label &label) {
   return std::string();
 }
 
-inline void append_xde_nodes(const TDF_Label &label, const std::string &parent_entry, std::vector<XdeNode> &nodes) {
+inline void append_xde_nodes(const TDF_Label &label, const std::string &parent_entry,
+                             const Handle(XCAFDoc_ColorTool) &colorTool,
+                             std::vector<XdeNode> &nodes) {
   XdeNode node;
   node.entry = label_entry_string(label);
   node.parent_entry = parent_entry;
@@ -171,12 +179,23 @@ inline void append_xde_nodes(const TDF_Label &label, const std::string &parent_e
     }
   }
 
+  // Extract color from the XDE document
+  Quantity_Color color;
+  if (colorTool->GetColor(label, XCAFDoc_ColorGen, color) ||
+      colorTool->GetColor(label, XCAFDoc_ColorSurf, color) ||
+      colorTool->GetColor(label, XCAFDoc_ColorCurv, color)) {
+    node.has_color = true;
+    node.color_r = color.Red();
+    node.color_g = color.Green();
+    node.color_b = color.Blue();
+  }
+
   nodes.push_back(node);
 
   TDF_LabelSequence components;
   if (XCAFDoc_ShapeTool::GetComponents(label, components, Standard_False)) {
     for (Standard_Integer index = 1; index <= components.Length(); ++index) {
-      append_xde_nodes(components.Value(index), node.entry, nodes);
+      append_xde_nodes(components.Value(index), node.entry, colorTool, nodes);
     }
   }
 }
@@ -489,11 +508,12 @@ inline std::unique_ptr<XdeDocument> read_step_xde(rust::String theFileName) {
   }
 
   document->shape_tool = XCAFDoc_DocumentTool::ShapeTool(document->doc->Main());
+  Handle(XCAFDoc_ColorTool) colorTool = XCAFDoc_DocumentTool::ColorTool(document->doc->Main());
 
   TDF_LabelSequence free_shapes;
   document->shape_tool->GetFreeShapes(free_shapes);
   for (Standard_Integer index = 1; index <= free_shapes.Length(); ++index) {
-    append_xde_nodes(free_shapes.Value(index), std::string(), document->nodes);
+    append_xde_nodes(free_shapes.Value(index), std::string(), colorTool, document->nodes);
   }
 
   return document;
@@ -531,6 +551,22 @@ inline std::unique_ptr<TopLoc_Location> xde_node_location(const XdeDocument &doc
 
 inline std::unique_ptr<TopoDS_Shape> xde_node_shape(const XdeDocument &document, size_t index) {
   return std::unique_ptr<TopoDS_Shape>(new TopoDS_Shape(document.nodes.at(index).shape));
+}
+
+inline bool xde_node_has_color(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).has_color;
+}
+
+inline double xde_node_color_r(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).color_r;
+}
+
+inline double xde_node_color_g(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).color_g;
+}
+
+inline double xde_node_color_b(const XdeDocument &document, size_t index) {
+  return document.nodes.at(index).color_b;
 }
 
 // Data Export
