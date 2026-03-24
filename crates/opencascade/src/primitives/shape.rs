@@ -695,6 +695,19 @@ impl Shape {
         Self::from_shape(upgrader.Shape())
     }
 
+    fn transform_with_trsf(&self, transform: &ffi::gp_Trsf) -> Self {
+        let mut op = ffi::BRepBuilderAPI_Transform_ctor(&self.inner, transform, true);
+        op.pin_mut().Build(&ffi::Message_ProgressRange_ctor());
+        Self::from_shape(op.pin_mut().Shape())
+    }
+
+    fn rotate_about_axis(&self, axis_dir: DVec3, angle_rad: f64) -> Self {
+        let axis = ffi::gp_Ax1_ctor(&make_point(DVec3::ZERO), &make_dir(axis_dir));
+        let mut transform = ffi::new_transform();
+        transform.pin_mut().SetRotation(&axis, angle_rad);
+        self.transform_with_trsf(&transform)
+    }
+
     #[must_use]
     pub fn transform_matrix(&self, matrix: DMat4) -> Self {
         let mut transform = ffi::new_gp_GTrsf();
@@ -715,17 +728,31 @@ impl Shape {
 
     #[must_use]
     pub fn translate(&self, offset: DVec3) -> Self {
-        self.transform_matrix(DMat4::from_translation(offset))
+        let mut transform = ffi::new_transform();
+        let translation_vec = make_vec(offset);
+        transform.pin_mut().set_translation_vec(&translation_vec);
+        self.transform_with_trsf(&transform)
     }
 
     #[must_use]
     pub fn rotate(&self, angles_deg: DVec3) -> Self {
         let angles =
             dvec3(angles_deg.x.to_radians(), angles_deg.y.to_radians(), angles_deg.z.to_radians());
-        let rotation = DMat4::from_rotation_z(angles.z)
-            * DMat4::from_rotation_y(angles.y)
-            * DMat4::from_rotation_x(angles.x);
-        self.transform_matrix(rotation)
+        let rotated_x = if angles.x.abs() > f64::EPSILON {
+            self.rotate_about_axis(DVec3::X, angles.x)
+        } else {
+            Self::from_shape(&self.inner)
+        };
+        let rotated_xy = if angles.y.abs() > f64::EPSILON {
+            rotated_x.rotate_about_axis(DVec3::Y, angles.y)
+        } else {
+            rotated_x
+        };
+        if angles.z.abs() > f64::EPSILON {
+            rotated_xy.rotate_about_axis(DVec3::Z, angles.z)
+        } else {
+            rotated_xy
+        }
     }
 
     #[must_use]
