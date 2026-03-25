@@ -130,6 +130,7 @@ struct XdeDocument {
 struct StepAssemblyWriter {
   Handle(TDocStd_Document) doc;
   Handle(XCAFDoc_ShapeTool) shape_tool;
+  Handle(XCAFDoc_ColorTool) color_tool;
   TDF_Label root;
   STEPCAFControl_Writer writer;
 };
@@ -179,11 +180,11 @@ inline void append_xde_nodes(const TDF_Label &label, const std::string &parent_e
     }
   }
 
-  // Extract color from the XDE document
+  // Resolve the effective color for this instance, including SHUO/reference fallbacks.
   Quantity_Color color;
-  if (colorTool->GetColor(label, XCAFDoc_ColorGen, color) ||
-      colorTool->GetColor(label, XCAFDoc_ColorSurf, color) ||
-      colorTool->GetColor(label, XCAFDoc_ColorCurv, color)) {
+  if (colorTool->GetInstanceColor(node.shape, XCAFDoc_ColorGen, color) ||
+      colorTool->GetInstanceColor(node.shape, XCAFDoc_ColorSurf, color) ||
+      colorTool->GetInstanceColor(node.shape, XCAFDoc_ColorCurv, color)) {
     node.has_color = true;
     node.color_r = color.Red();
     node.color_g = color.Green();
@@ -588,6 +589,7 @@ inline std::unique_ptr<StepAssemblyWriter> step_assembly_writer_new(rust::String
   Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
   app->NewDocument("MDTV-XCAF", writer->doc);
   writer->shape_tool = XCAFDoc_DocumentTool::ShapeTool(writer->doc->Main());
+  writer->color_tool = XCAFDoc_DocumentTool::ColorTool(writer->doc->Main());
   writer->root = writer->shape_tool->NewShape();
   if (!root_name.empty()) {
     TDataStd_Name::Set(writer->root, TCollection_ExtendedString(root_name.c_str()));
@@ -598,6 +600,15 @@ inline std::unique_ptr<StepAssemblyWriter> step_assembly_writer_new(rust::String
   writer->writer.SetPropsMode(Standard_False);
 
   return writer;
+}
+
+inline bool step_assembly_writer_set_shape_color(StepAssemblyWriter &writer,
+                                                 const TopoDS_Shape &shape,
+                                                 double red,
+                                                 double green,
+                                                 double blue) {
+  Quantity_Color color(red, green, blue, Quantity_TOC_RGB);
+  return writer.color_tool->SetColor(shape, color, XCAFDoc_ColorGen);
 }
 
 inline void step_assembly_writer_add_shape(StepAssemblyWriter &writer, rust::String name, const TopoDS_Shape &shape) {

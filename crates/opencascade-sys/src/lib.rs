@@ -1029,6 +1029,7 @@ pub mod ffi {
         pub fn SetScale(self: Pin<&mut gp_Trsf>, point: &gp_Pnt, scale: f64);
         pub fn SetTranslation(self: Pin<&mut gp_Trsf>, point1: &gp_Pnt, point2: &gp_Pnt);
         pub fn Value(self: &gp_Trsf, the_row: i32, the_col: i32) -> f64;
+        #[allow(clippy::too_many_arguments)]
         pub fn SetValues(
             self: Pin<&mut gp_Trsf>,
             a11: f64,
@@ -1260,6 +1261,13 @@ pub mod ffi {
             name: String,
             shape: &TopoDS_Shape,
         );
+        pub fn step_assembly_writer_set_shape_color(
+            writer: Pin<&mut StepAssemblyWriter>,
+            shape: &TopoDS_Shape,
+            red: f64,
+            green: f64,
+            blue: f64,
+        ) -> bool;
         pub fn step_assembly_writer_add_shape_located(
             writer: Pin<&mut StepAssemblyWriter>,
             name: String,
