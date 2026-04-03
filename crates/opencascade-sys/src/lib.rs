@@ -571,6 +571,8 @@ pub mod ffi {
         pub fn Shape(self: Pin<&mut BRepBuilderAPI_MakeFace>) -> &TopoDS_Shape;
         pub fn Build(self: Pin<&mut BRepBuilderAPI_MakeFace>, progress: &Message_ProgressRange);
         pub fn IsDone(self: &BRepBuilderAPI_MakeFace) -> bool;
+        #[rust_name = "add_wire"]
+        pub fn Add(self: Pin<&mut BRepBuilderAPI_MakeFace>, wire: &TopoDS_Wire);
 
         // BRepAdaptor
         type BRepAdaptor_Curve;

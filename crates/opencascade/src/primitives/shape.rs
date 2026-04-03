@@ -441,13 +441,26 @@ impl Shape {
         radius: f64,
         edges: impl IntoIterator<Item = T>,
     ) -> Self {
+        self.try_fillet_edges(radius, edges).expect("OCCT fillet operation failed")
+    }
+
+    pub fn try_fillet_edges<T: AsRef<Edge>>(
+        &self,
+        radius: f64,
+        edges: impl IntoIterator<Item = T>,
+    ) -> Result<Self, Error> {
         let mut make_fillet = ffi::BRepFilletAPI_MakeFillet_ctor(&self.inner);
 
         for edge in edges.into_iter() {
             make_fillet.pin_mut().add_edge(radius, &edge.as_ref().inner);
         }
 
-        Self::from_shape(make_fillet.pin_mut().Shape())
+        make_fillet.pin_mut().Build(&ffi::Message_ProgressRange_ctor());
+        if !make_fillet.IsDone() {
+            return Err(Error::FilletFailed);
+        }
+
+        Ok(Self::from_shape(make_fillet.pin_mut().Shape()))
     }
 
     #[must_use]

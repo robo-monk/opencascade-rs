@@ -39,6 +39,16 @@ impl Face {
         Self::from_make_face(make_face)
     }
 
+    pub fn from_planar_wires(outer: &Wire, holes: &[Wire]) -> Self {
+        let only_plane = false;
+        let mut make_face = ffi::BRepBuilderAPI_MakeFace_wire(&outer.inner, only_plane);
+        for hole in holes {
+            make_face.pin_mut().add_wire(&hole.inner);
+        }
+        make_face.pin_mut().Build(&ffi::Message_ProgressRange_ctor());
+        Self::from_make_face(make_face)
+    }
+
     pub fn from_surface(surface: &Surface) -> Self {
         const EDGE_TOLERANCE: f64 = 0.0001;
 

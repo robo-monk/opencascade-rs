@@ -36,4 +36,6 @@ pub enum Error {
     UntriangulatedFace,
     #[error("at least 2 points are required for creating a wire")]
     NotEnoughPoints,
+    #[error("failed to build fillet")]
+    FilletFailed,
 }
